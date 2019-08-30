@@ -1,0 +1,120 @@
+import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
+
+
+data_train = pd.read_csv("yingxiao_vou_train_feature__833ed364_db08_46a0_8141_3c5a1ce8a9c0")  #读取历史训练数据
+data_train_tag = pd.read_csv("yingxiao_vou_train_tag__9a0ce38f_c66c_48d8_ae4b_0038b24237d4")  #读取训练数据的tag
+data_test = pd.read_csv("yingxiao_vou_test_feature__4099e4b9_620f_4c60_8a89_62f6326cc0ba")    #读取测试集
+
+df = pd.concat([data_train, data_test], axis = 0)
+df = pd.merge(df, data_train_tag, how = 'left')
+
+
+df.head(1000)
+
+
+
+from sklearn.preprocessing import LabelEncoder
+
+labelfeature = ['gender','phone_clec_cd','phone_prov_cd','phone_city_cd', 'user_lvl','auth_stat','credit_stat','image_stat','pay_stat',
+                'red_packet_stat','orange_inst_stat','finance_member_stat','insurance_member_stat','loan_member_stat','consume_time',
+                'life_consume_stst','phone_consume_stst']
+LE = LabelEncoder()
+for col in labelfeature:
+    if str(df[col].dtype) == 'object':
+        df[col] = LE.fit_transform(df[col].astype(str)).astype(int)
+        
+
+
+
+
+
+
+def midfun(zone):
+    if zone == '':
+        return 0
+    if '，' not in zone:
+        return float(zone)
+    left = zone[1 : len(zone)-1].split('，')[0]
+    right = zone[1 : len(zone)-1].split('，')[1]
+    
+    if left == '':
+        return float(right)
+    elif right == '':
+        return float(left)
+    else:
+        return (float(left) + float(right)) / 2
+
+midfeature = ['age','balance_lvl','finance_balance_lvl','balance_avg_lvl','finance_amt_lvl','finance_withdraw_lvl','last_finance_amt_lvl',
+              'jd_consume_amt_lvl','offline_consume_amt_lvl','marketing_order_amt_lvl','marketing_bonus_amt_lvl','last_marketing_bonus_amt_lvl',
+              'life_consume_amt','phone_consume_amt']
+for col in midfeature:
+    df[col] = df[col].map(midfun)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+train=df[df.tag.notnull()]  
+test=df[df.tag.isnull()]
+
+
+
+
+
+
+
+import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
+
+
+data_train = pd.read_csv("yingxiao_vou_train_feature__833ed364_db08_46a0_8141_3c5a1ce8a9c0")  #读取历史训练数据
+data_train_tag = pd.read_csv("yingxiao_vou_train_tag__9a0ce38f_c66c_48d8_ae4b_0038b24237d4")  #读取训练数据的tag
+data_test = pd.read_csv("yingxiao_vou_test_feature__4099e4b9_620f_4c60_8a89_62f6326cc0ba")    #读取测试集
+
+df = pd.concat([data_train, data_test], axis = 0)
+df.head(100)
+
+
+
+
+from sklearn.preprocessing import LabelEncoder
+
+LE = LabelEncoder()
+for col in df.columns[1:]:
+    if str(df[col].dtype) == 'object':
+        df[col] = LE.fit_transform(df[col].astype(str)).astype(int)
+
+
+
+phone_city_cd = pd.get_dummies( df['phone_city_cd'] , prefix='phone_city_cd' )  #特征三 手机运营商 phone_clec_cd 
+df = pd.concat([df,phone_city_cd],axis=1)
+df.drop('phone_city_cd',axis=1, inplace=True)
+
+
+
+
+df = pd.merge(df,data_train_tag,how='left',on='uid')                           #将训练数据和tag进行merge
+
+feature_train=df[df.tag.notnull()]  
+feature_test=df[df.tag.isnull()]
+
+#feature_test.drop('tag',axis=1, inplace=True)
+feature_test.shape
+
+
+feature_train.to_csv("yingxiao_train.csv",index = False)
+feature_test.to_csv("yingxiao_test.csv",index = False)
