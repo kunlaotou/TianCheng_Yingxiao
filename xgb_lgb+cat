@@ -1,0 +1,275 @@
+import xgboost as xgb
+import lightgbm as lgb  
+from catboost import CatBoostClassifier, Pool
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn import metrics
+from sklearn.metrics import f1_score
+import warnings
+warnings.filterwarnings("ignore")
+from time import time
+
+
+data_train = pd.read_csv("../yingxiao_train.csv")
+
+
+params = {
+            'objective': 'binary:logistic',
+            'eta': 0.01, #default=0.3
+            'max_depth':23,#default=6
+            'seed': 42,
+           
+            'verbosity':1,  #标记是否输出运行时详细故障
+            'nthread':4,
+            'min_child_weight':25,  #子级中允许的最小Hessian（权重）
+            'subsample':0.8,        #是否要做子样本
+            'colsample_bytree':0.7, #在树构造期间是否对列进行子采样
+            'lambda':1,             #1  L2正则化   
+            'alpha':0,#alpha:0      #L1正则化
+            'eval_metric':'auc',    
+
+            'tree_method':'hist',   #default= auto
+            'grow_policy': 'lossguide',  #[default= depthwise]
+            'max_leaves':50,
+            'max_bin':256, #[default=256]
+           
+            }
+
+feature = [x for x in data_train.columns if x not in ['uid','tag']] 
+
+X_train, X_test, y_train, y_test = train_test_split(
+        data_train[feature],
+        data_train['tag'],
+        test_size=0.20,
+        random_state=42,
+        stratify=data_train['tag']
+    )
+
+xgbtrain = xgb.DMatrix(X_train, y_train) 
+xgbvalid = xgb.DMatrix(X_test,y_test)
+xgbtest = xgb.DMatrix(X_test)
+
+watchlist = [ (xgbtrain,'train'), (xgbvalid, 'eval') ]
+num_boost_round = 6000
+
+model = xgb.train(params, xgbtrain, num_boost_round, watchlist, early_stopping_rounds=100)
+
+
+
+preds_offline  = model.predict(xgbtest) 
+
+def threshold_search(y_true, y_proba):
+    best_threshold = 0
+    best_score = 0
+    for threshold in [i * 0.002 for i in range(1000)]:
+        
+        score = f1_score(y_true=y_true, y_pred=np.where(np.array(y_proba) > threshold,1,0) )
+        if score > best_score:
+            best_threshold = threshold
+            best_score = score
+    search_result = {'threshold': best_threshold, 'f1': best_score}
+    return best_threshold
+
+bestthreshold = threshold_search(y_test, preds_offline)
+pred = []
+for i in range(len(preds_offline)):
+    if preds_offline[i] > bestthreshold:
+        pred.append(1)
+    else:
+        pred.append(0)
+        
+test_auc = metrics.roc_auc_score(y_test,pred)#auc值
+test_f1 = f1_score(y_test, pred, average='macro')# f1
+res = 0.7 * test_auc + test_f1 * 0.3
+print("auc : " + str(test_auc))
+print("f1 : " + str(test_f1))
+print("ans : " + str(res))
+
+%matplotlib inline
+from matplotlib import pyplot as plt 
+import pylab
+pylab.rcParams['figure.figsize'] = (25.0, 28.0) 
+xgb.plot_importance(model)
+
+
+
+clf2 = lgb.LGBMClassifier(
+       boosting='gbdt',
+        objective='binary',
+        metric= 'auc',
+    
+        reg_alpha=0.0, 
+        reg_lambda=1,
+       
+        n_estimators=5000, 
+    
+        subsample=0.8,
+        colsample_bytree=0.7, 
+        subsample_freq=1,
+    
+        learning_rate=0.01,  #jiansen
+        min_child_weight=50,
+        seed=27, 
+        num_threads=4,
+        #max_depth=23,   #jiansen
+        num_leaves=50,
+         #max_bin=158,
+        min_data_in_leaf=50,#20 jiansen
+    )
+
+clf2.fit(X_train, y_train, eval_set=[(X_test, y_test)], eval_metric='auc',early_stopping_rounds=100)
+
+
+
+y_prob_clf2 = clf2.predict_proba(X_test)
+preds_offline_lgb = []
+for i in range(len(y_prob_clf2)):
+    preds_offline_lgb.append(y_prob_clf2[i][1])
+
+    
+def threshold_search(y_true, y_proba):
+    best_threshold = 0
+    best_score = 0
+    for threshold in [i * 0.002 for i in range(1000)]:
+        
+        score = f1_score(y_true=y_true, y_pred=np.where(np.array(y_proba) > threshold,1,0) )
+        if score > best_score:
+            best_threshold = threshold
+            best_score = score
+    search_result = {'threshold': best_threshold, 'f1': best_score}
+    return best_threshold
+
+bestthreshold = threshold_search(y_test, preds_offline_lgb)
+pred = []
+for i in range(len(preds_offline)):
+    if preds_offline[i] > bestthreshold:
+        pred.append(1)
+    else:
+        pred.append(0)
+        
+test_auc = metrics.roc_auc_score(y_test,pred)#auc值
+test_f1 = f1_score(y_test, pred, average='macro')# f1
+res = 0.7 * test_auc + test_f1 * 0.3
+print("auc : " + str(test_auc))
+print("f1 : " + str(test_f1))
+print("ans : " + str(res))
+
+
+
+feature = [x for x in data_train.columns if x not in ['uid','tag']] 
+
+X_train, X_test, y_train, y_test = train_test_split(
+        data_train[feature],
+        data_train['tag'],
+        test_size=0.20,
+        random_state=42,
+        stratify=data_train['tag']
+    )
+
+
+
+num_feature=['account_num_lvl','agmt_num_lvl','login_num_lvl',
+            'account_age_lvl',
+            'pwd_change_count_lvl' ,
+            'finance_num_lvl' ,
+            'offline_consume_shop_count_lvl',
+            'offline_consume_count_lvl',
+            'marketing_days',
+            'life_consume_cnt' ,
+            'phone_consume_cnt'] 
+
+train_pool = Pool(X_train, 
+                  y_train, 
+                  cat_features=X_train.columns[~X_train.columns.isin(num_feature)])
+
+validate_pool = Pool(X_test, 
+                     y_test, 
+                     cat_features=X_train.columns[~X_train.columns.isin(num_feature)])
+
+clf3 = CatBoostClassifier(cat_features=X_train.columns[~X_train.columns.isin(num_feature)],
+                              iterations=10000,  #default:1000 yao tiao gao cai xing:4000
+                              custom_metric='AUC',
+                               loss_function= 'CrossEntropy',   #'Logloss',
+                               eval_metric='AUC',
+                               learning_rate=0.02,#jiansen
+                               random_seed=42,
+                               depth=10,#6-16
+                               l2_leaf_reg=5,#default 3.0
+                               early_stopping_rounds=100,
+                               logging_level='Verbose',
+                               thread_count=4)
+
+clf3.fit(train_pool, eval_set=validate_pool,use_best_model=True,plot=True)
+
+clf3.best_score_
+
+test_ans_pred3 =clf3.predict_proba(X_test)
+
+preds_offline_cat = []
+for i in range(len(test_ans_pred3)):
+    preds_offline_cat.append(test_ans_pred3[i][1]) 
+    
+    
+def threshold_search(y_true, y_proba):
+    best_threshold = 0
+    best_score = 0
+    for threshold in [i * 0.002 for i in range(1000)]:
+        
+        score = f1_score(y_true=y_true, y_pred=np.where(np.array(y_proba) > threshold,1,0) )
+        if score > best_score:
+            best_threshold = threshold
+            best_score = score
+    search_result = {'threshold': best_threshold, 'f1': best_score}
+    return best_threshold
+
+bestthreshold = threshold_search(y_test, preds_offline_cat)
+pred = []
+for i in range(len(preds_offline)):
+    if preds_offline[i] > bestthreshold:
+        pred.append(1)
+    else:
+        pred.append(0)
+        
+test_auc = metrics.roc_auc_score(y_test,pred)#auc值
+test_f1 = f1_score(y_test, pred, average='macro')# f1
+res = 0.7 * test_auc + test_f1 * 0.3
+print("auc : " + str(test_auc))
+print("f1 : " + str(test_f1))
+print("ans : " + str(res))
+
+
+pred_final=(2*preds_offline+2*np.array(preds_offline_lgb)+6*np.array(preds_offline_cat))/10.0
+max(pred_final.tolist())
+
+
+from sklearn.metrics import f1_score
+def threshold_search(y_true, y_proba):
+    best_threshold = 0
+    best_score = 0
+    for threshold in [i * 0.002 for i in range(1000)]:
+        
+        score = f1_score(y_true=y_true, y_pred=np.where(np.array(y_proba) > threshold,1,0) )
+        if score > best_score:
+            best_threshold = threshold
+            best_score = score
+    search_result = {'threshold': best_threshold, 'f1': best_score}
+    return search_result
+best_threshold = threshold_search(y_test,pred_final)['threshold']
+
+
+
+
+pred = []
+for i in range(len(pred_final)):
+    if pred_final[i] >best_threshold:
+        pred.append(1)
+    else:
+        pred.append(0)
+
+test_auc = metrics.roc_auc_score(y_test,pred_final)#auc值,y_test：标签，y_prob_2：概率
+test_f1 = f1_score(y_test, pred)# f1，pred：标签
+result = 0.7*test_auc + 0.3*test_f1
+print(test_auc)
+print(test_f1)
+print(result)
